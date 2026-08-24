@@ -20,12 +20,17 @@ SITE="$RAIZ/site"
 n_arq=$(find "$SITE" -type f | wc -l | tr -d ' ')
 echo "==> empacotando $n_arq arquivos de site/"
 
-# COPYFILE_DISABLE=1 é obrigatório no macOS: sem isso o tar injeta um arquivo
-# AppleDouble '._nome' para CADA arquivo e diretório, o que aqui triplicaria a
-# contagem (29.843 -> 89.523) e despejaria lixo binário no docroot público.
+# Três precauções, todas por causa do tar do macOS:
+#  * COPYFILE_DISABLE=1 — sem isso o tar injeta um AppleDouble '._nome' para CADA
+#    arquivo e diretório, triplicando a contagem (29.844 -> 89.523) e despejando
+#    lixo binário no docroot público.
+#  * --no-mac-metadata e --no-xattrs — sem eles cada entrada carrega o atributo
+#    com.apple.provenance, e o GNU tar do servidor emite um aviso por arquivo:
+#    29.844 linhas de ruído que escondem o resultado real do deploy.
 TAR="$(mktemp -t site-servicos).tar.gz"
 trap 'rm -f "$TAR"' EXIT
-COPYFILE_DISABLE=1 tar --exclude '.DS_Store' --exclude '._*' \
+COPYFILE_DISABLE=1 tar --no-mac-metadata --no-xattrs \
+    --exclude '.DS_Store' --exclude '._*' \
     -czf "$TAR" -C "$SITE" .
 echo "==> $(du -h "$TAR" | cut -f1) comprimido"
 
