@@ -63,6 +63,9 @@ PALETA = {
 
 ATIVOS = RAIZ / "ativos"        # logotipo e afins; copiados para site/estatico/
 LOGO = "logo-teclacenter-servicos.png"
+# Favicon. O gerador aceita, opcionalmente, ativos/favicon-180.png (apple-touch)
+# e ativos/favicon-512.png (ícone de alta densidade) e os declara se existirem.
+FAVICON = "favicon.png"
 
 # Rótulo e texto de apoio de cada vertical, usados em título, H1 e meta description.
 VERTICAIS = {

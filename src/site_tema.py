@@ -134,3 +134,28 @@ def css_com_hash() -> tuple[str, str]:
     texto = css()
     h = hashlib.sha256(texto.encode()).hexdigest()[:10]
     return f"tc.{h}.css", texto
+
+
+def png_para_ico(png: bytes) -> bytes:
+    """Empacota um PNG dentro de um contêiner ICO.
+
+    O navegador pede /favicon.ico sozinho, mesmo havendo <link rel="icon">.
+    Sem esse arquivo, todo primeiro acesso gera um 404 no log e uma requisição
+    perdida. O formato ICO aceita PNG como carga desde o Windows Vista, então
+    não há reamostragem nem perda: são 22 bytes de cabeçalho na frente do PNG
+    original. Sem Pillow, sem dependência nova.
+    """
+    import struct
+    largura, altura = struct.unpack(">II", png[16:24])
+    # No ICO, 256 é gravado como 0. Acima disso o formato não comporta.
+    if not (0 < largura <= 256 and 0 < altura <= 256):
+        raise ValueError(f"ICO aceita até 256x256; recebi {largura}x{altura}")
+    cabecalho = struct.pack("<HHH", 0, 1, 1)          # reservado, tipo=ícone, 1 imagem
+    entrada = struct.pack(
+        "<BBBBHHII",
+        largura % 256, altura % 256,                  # 256 -> 0
+        0, 0,                                         # paleta, reservado
+        1, 32,                                        # planos, bits por pixel
+        len(png), 22,                                 # tamanho e deslocamento da carga
+    )
+    return cabecalho + entrada + png

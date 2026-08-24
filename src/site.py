@@ -22,11 +22,11 @@ import sys
 import time
 from pathlib import Path
 
-from config import (ATIVOS, LOGO, POR_PAGINA, SAFRA, SAFRA_DATA, SITE,
+from config import (ATIVOS, FAVICON, LOGO, POR_PAGINA, SAFRA, SAFRA_DATA, SITE,
                     SITE_DESCRICAO, SITE_EMAIL_CONTATO, SITE_NOME, SITE_URL,
                     VERTICAIS)
 from db import conectar
-from site_tema import css_com_hash, logo_svg
+from site_tema import css_com_hash, logo_svg, png_para_ico
 
 UF_NOME = {
     "AC": "Acre", "AL": "Alagoas", "AM": "Amazonas", "AP": "Amapá", "BA": "Bahia",
@@ -90,10 +90,59 @@ def _preparar_marca() -> str:
 
 
 _MARCA = ""
+_ICONES = ""
 
 
 def _marca() -> str:
     return _MARCA
+
+
+def _preparar_icones() -> str:
+    """Copia o favicon, gera /favicon.ico e devolve as tags <link> do <head>.
+
+    O PNG vai com hash no nome, para poder ter cache imutável. O .ico fica na
+    raiz com nome fixo, porque é o caminho que o navegador pede sozinho: cache
+    mais curto, já que o nome não pode mudar.
+    """
+    import hashlib
+
+    origem = ATIVOS / FAVICON
+    if not origem.exists():
+        print(f"  aviso: {origem} não existe -> site sem favicon")
+        return ""
+    png = origem.read_bytes()
+    h = hashlib.sha256(png).hexdigest()[:10]
+    nome = f"favicon.{h}.png"
+    (SITE / "estatico" / nome).write_bytes(png)
+    _paginas_contar()
+
+    # /favicon.ico: o navegador pede este caminho mesmo com <link rel="icon">.
+    # Sem o arquivo, todo primeiro acesso vira um 404 no log.
+    try:
+        (SITE / "favicon.ico").write_bytes(png_para_ico(png))
+        _paginas_contar()
+    except ValueError as erro:
+        print(f"  aviso: favicon.ico não gerado ({erro})")
+
+    tags = [f'<link rel="icon" type="image/png" href="/estatico/{nome}">']
+    # Tamanhos extras, se existirem. Ninguém precisa criá-los: são opcionais.
+    for arquivo, rel, tam in (("favicon-180.png", "apple-touch-icon", "180x180"),
+                              ("favicon-512.png", "icon", "512x512")):
+        extra = ATIVOS / arquivo
+        if not extra.exists():
+            continue
+        dados = extra.read_bytes()
+        he = hashlib.sha256(dados).hexdigest()[:10]
+        alvo = f"{arquivo.removesuffix('.png')}.{he}.png"
+        (SITE / "estatico" / alvo).write_bytes(dados)
+        _paginas_contar()
+        tags.append(f'<link rel="{rel}" sizes="{tam}" href="/estatico/{alvo}">')
+    return "".join(tags)
+
+
+def _paginas_contar() -> None:
+    global _paginas_escritas
+    _paginas_escritas += 1
 
 
 def _shell(*, titulo, descricao, url, corpo, css_nome, trilha=None,
@@ -130,6 +179,7 @@ def _shell(*, titulo, descricao, url, corpo, css_nome, trilha=None,
 <meta property="og:url" content="{e(url)}">
 <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
 <link rel="stylesheet" href="/estatico/{css_nome}">
+{_ICONES}
 {ld}</head>
 <body>
 <header class="topo"><div class="env"><a class="marca" href="/" aria-label="{e(SITE_NOME)} — início">{_marca()}</a></div></header>
@@ -516,6 +566,12 @@ AddDefaultCharset UTF-8
   <FilesMatch "^(robots\\.txt|llms\\.txt|sitemap.*\\.xml)$">
     Header set Cache-Control "public, max-age=86400"
   </FilesMatch>
+
+  # favicon.ico tem nome fixo (o navegador pede este caminho), então não pode
+  # ser imutável: uma semana.
+  <FilesMatch "^favicon\\.ico$">
+    Header set Cache-Control "public, max-age=604800"
+  </FilesMatch>
 </IfModule>
 
 # Netlify/Cloudflare Pages leem _headers; Apache não. Não servir esses arquivos.
@@ -562,8 +618,9 @@ def gerar() -> int:
     SITE.mkdir(parents=True, exist_ok=True)
     css_nome, css_texto = css_com_hash()
     _escrever(SITE / "estatico" / css_nome, css_texto)
-    global _MARCA
+    global _MARCA, _ICONES
     _MARCA = _preparar_marca()
+    _ICONES = _preparar_icones()
 
     urls, totais = [], {}
     colunas = [d[0] for d in con.execute("SELECT * FROM publicacao LIMIT 0").description]
