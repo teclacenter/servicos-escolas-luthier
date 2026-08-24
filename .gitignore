@@ -1,0 +1,12 @@
+.venv/
+extraidos/
+tmp/
+cnpj.duckdb
+cnpj.duckdb.wal
+saida/
+site/
+Receita-cnpj-dados/
+.DS_Store
+__pycache__/
+.pytest_cache/
+deploy.env
