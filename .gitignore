@@ -1,12 +1,22 @@
-.venv/
-extraidos/
-tmp/
+# Entradas SEM barra no fim de propósito.
+#
+# Nesta máquina os diretórios pesados são symlinks para um SSD externo
+# (/Volumes/SSD-SANDISK/CACHE-LOCAL/...), e um padrão terminado em '/' casa
+# apenas DIRETÓRIO: o symlink escapa e reaparece como não rastreado no
+# `git status` — ruído permanente e convite a um `git add -A` distraído.
+# Sem a barra, o padrão casa diretório, symlink e arquivo.
+.venv
+extraidos
+tmp
+saida
+site
+Receita-cnpj-dados
 cnpj.duckdb
 cnpj.duckdb.wal
-saida/
-site/
-Receita-cnpj-dados/
-.DS_Store
+
+# Estes nunca são symlink; a barra documenta que são diretórios.
 __pycache__/
 .pytest_cache/
+
+.DS_Store
 deploy.env
