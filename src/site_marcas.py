@@ -37,6 +37,11 @@ RAIZ_MARCAS = f"/{VERTICAL}/marca"
 HUB = f"/{VERTICAL}/marcas/"
 ROTULO_VERTICAL = "Assistência técnica"
 
+# A categoria no menu. Chave própria (e não a da vertical) para que o item
+# marcado como corrente seja "Assistência por marca", não "Assistência técnica".
+NAV_CHAVE = "marcas"
+NAV_ROTULO = "Assistência por marca"
+
 
 def _data_br(d) -> str:
     return d.strftime("%d/%m/%Y") if d else ""
@@ -111,15 +116,58 @@ class Marcas:
         """Chamada para o hub de marcas, na página nacional da vertical."""
         if not self.disponivel:
             return ""
-        destaques = ", ".join(MARCAS[m]["nome"] for m in self.ordenadas()
-                              if MARCAS[m]["destaque"])
+        # uma marca por distribuidor: citar sete da ProShows seguidas daria a
+        # impressão de sete redes onde há uma
+        vistos, exemplos = set(), []
+        for m in self.destaques():
+            fonte = MARCAS[m]["fonte"]
+            if fonte not in vistos:
+                vistos.add(fonte)
+                exemplos.append(MARCAS[m]["nome"])
         return (f'<h2>Assistência autorizada por marca</h2>'
                 f'<p class="resumo">Além da lista por cidade, o site publica a '
-                f'rede credenciada de {len(self.postos)} marcas — {e(destaques)} '
-                f'e outras — com o que o próprio fabricante ou distribuidor '
-                f'informa.</p>'
+                f'rede credenciada de {len(self.postos)} marcas — '
+                f'{e(", ".join(exemplos))} e outras — com o que o próprio '
+                f'fabricante ou distribuidor informa.</p>'
                 f'<p><a class="botao" href="{HUB}">Ver as '
                 f'{len(self.postos)} marcas</a></p>')
+
+    def destaques(self) -> list:
+        """Marcas reconhecíveis pelo nome, em ordem alfabética.
+
+        Alfabética de propósito: não temos volume de busca, e ordenar por
+        "mais procuradas" seria inventar um dado. O número de oficinas, que é
+        medido, aparece ao lado de cada uma.
+        """
+        return sorted((m for m in self.postos if MARCAS[m]["destaque"]),
+                      key=lambda m: MARCAS[m]["nome"].lower())
+
+    def bloco_home(self) -> str:
+        """Seção da página inicial. A categoria entra na home como as verticais,
+        mas com o número que faz sentido aqui: marcas e oficinas, não CNPJ."""
+        if not self.disponivel:
+            return ""
+        oficinas = self.oficinas()
+        itens = "".join(
+            f'<li><a href="{RAIZ_MARCAS}/{m}/"><span>{e(MARCAS[m]["nome"])}</span>'
+            f'<span class="n">{num(self.total(m))}</span></a></li>'
+            for m in self.destaques())
+        return (f'<h2>Assistência técnica autorizada por marca</h2>'
+                f'<p class="resumo">{num(oficinas)} oficinas credenciadas por '
+                f'{len(self.postos)} marcas de instrumentos musicais e áudio, '
+                f'por estado e cidade. Origem separada da Receita Federal: é o '
+                f'que cada fabricante ou distribuidor publica no próprio site. '
+                f'O número ao lado é a quantidade de oficinas da marca.</p>'
+                f'<ul class="lugares">{itens}</ul>'
+                f'<p><a class="botao" href="{HUB}">Ver as '
+                f'{len(self.postos)} marcas</a></p>')
+
+    def oficinas(self) -> int:
+        """Oficinas distintas. Não é a soma por marca: uma oficina da ProShows
+        conta uma vez, e não dezenove."""
+        return len({p["posto_id"] for m in self.postos
+                    for uf in self.postos[m].values()
+                    for fichas in uf.values() for p in fichas})
 
     def linhas_llms(self) -> list:
         """Trecho do llms.txt. Motor de resposta lê isto antes das páginas."""
@@ -300,71 +348,115 @@ class Marcas:
 
     # ------------------------------------------------------------------- hub
     def _hub(self, css_nome, urls) -> None:
-        total = sum(self.total(m) for m in self.postos)
-        oficinas = len({p["posto_id"] for m in self.postos
-                        for uf in self.postos[m].values()
-                        for fichas in uf.values() for p in fichas})
+        """A página da categoria.
+
+        O trabalho dela é um só: quem chega aqui sabe a marca e quer achá-la.
+        Por isso a lista A-Z completa vem primeiro, com o distribuidor embaixo
+        do nome — e a explicação das redes compartilhadas vem depois, em prosa,
+        sem repetir as 43 marcas numa segunda lista.
+        """
+        oficinas = self.oficinas()
+        cidades = len({(uf, s) for m in self.postos
+                       for uf, c in self.postos[m].items() for s in c if s})
         resumo = (f"Rede de assistência técnica autorizada de {len(self.postos)} "
                   f"marcas de instrumentos musicais e áudio no Brasil: "
-                  f"{num(oficinas)} oficinas credenciadas, por estado e cidade, "
-                  f"como o próprio fabricante ou distribuidor publica.")
+                  f"{num(oficinas)} oficinas credenciadas em {num(cidades)} "
+                  f"cidades, com endereço e telefone, como o próprio fabricante "
+                  f"ou distribuidor publica.")
         trilha = [("Início", "/"), (ROTULO_VERTICAL, f"/{VERTICAL}/"),
-                  ("Marcas", None)]
+                  ("Por marca", None)]
 
-        # agrupado por quem credencia: é a informação que o visitante não tem e
-        # que explica por que marcas diferentes mostram a mesma oficina
-        secoes = []
+        # --- A-Z: o índice, que é o que a página existe para ser
+        def _linha_az(m):
+            nome = MARCAS[m]["nome"]
+            titular = FONTES[MARCAS[m]["fonte"]]["titular"]
+            # "Casio / Casio" não informa nada: o distribuidor só aparece
+            # quando é outro nome que o da marca
+            legenda = f"<small>{e(titular)}</small>" if nome not in titular else ""
+            return (f'<li><a href="{RAIZ_MARCAS}/{m}/">'
+                    f'<span>{e(nome)}{legenda}</span>'
+                    f'<span class="n">{num(self.total(m))}</span></a></li>')
+
+        az = "".join(_linha_az(m) for m in
+                     sorted(self.postos, key=lambda m: MARCAS[m]["nome"].lower()))
+
+        # --- quem credencia: prosa, uma vez por distribuidor
+        redes = []
         for fonte in sorted(FONTES, key=lambda f: FONTES[f]["titular"].lower()):
-            desta = [m for m in self.ordenadas() if MARCAS[m]["fonte"] == fonte]
+            desta = [m for m in self.postos if MARCAS[m]["fonte"] == fonte]
             if not desta:
                 continue
             f = FONTES[fonte]
-            # Num grupo de várias marcas o número é o mesmo em todas — é esse o
-            # ponto. Repetir "149" dezenove vezes só polui: vai no texto, uma vez.
-            uma_so = len(desta) == 1
-            itens = "".join(
-                f'<li><a href="{RAIZ_MARCAS}/{m}/"><span>{e(MARCAS[m]["nome"])}</span>'
-                + (f'<span class="n">{num(self.total(m))}</span>' if uma_so else "")
-                + "</a></li>" for m in desta)
-            oficinas = num(self.total(desta[0]))
-            texto = (f'{oficinas} oficinas credenciadas em rede própria.'
-                     if uma_so else
-                     f'{len(desta)} marcas, uma rede só: as mesmas {oficinas} '
-                     f'oficinas credenciadas por {e(f["titular"])} atendem todo '
-                     f'o portfólio.')
-            secoes.append(
-                f'<h2>{e(f["titular"])}</h2>'
-                f'<p class="resumo">{texto} '
-                f'<a href="{e(f["pagina"])}" rel="nofollow noopener">Página '
-                f'oficial</a>.</p>'
-                f'<ul class="lugares">{itens}</ul>')
+            n = num(self.total(desta[0]))
+            if len(desta) == 1:
+                # quando o distribuidor É a marca, "credencia a rede de Casio"
+                # depois de "Casio" fica redundante
+                marca_nome = MARCAS[desta[0]]["nome"]
+                de_quem = ("a própria rede" if marca_nome in f["titular"]
+                           else f"a rede de {e(marca_nome)}")
+                texto = (f"<strong>{e(f['titular'])}</strong> credencia {de_quem}: "
+                         f"{n} oficinas, sob o nome “{e(f['termo'])}”.")
+            else:
+                texto = (f"<strong>{e(f['titular'])}</strong> distribui "
+                         f"{len(desta)} marcas e credencia UMA rede para todas: "
+                         f"as mesmas {n} oficinas atendem o portfólio inteiro. "
+                         f"É por isso que a lista de "
+                         f"{e(MARCAS[self._representante(fonte)]['nome'])} e a de "
+                         f"{e(MARCAS[self._representante(fonte, 1)]['nome'])} são "
+                         f"a mesma lista.")
+            redes.append(f'<p class="resumo">{texto} '
+                         f'<a href="{e(f["pagina"])}" rel="nofollow noopener">'
+                         f'Página oficial</a>.</p>')
 
-        nao_publicadas = [MARCAS[s]["nome"] for s, m in MARCAS.items()
-                          if FONTES[m["fonte"]].get("bloqueada")]
+        nao_publicadas = sorted(MARCAS[s]["nome"] for s, m in MARCAS.items()
+                                if FONTES[m["fonte"]].get("bloqueada"))
         aviso = ""
         if nao_publicadas:
-            fonte_bloqueada = next(f for f in FONTES.values() if f.get("bloqueada"))
+            bloqueada = next(f for f in FONTES.values() if f.get("bloqueada"))
             aviso = (f'<h2>Marcas que ainda não publicamos</h2>'
-                     f'<p class="resumo">{e(", ".join(sorted(nao_publicadas)))}. '
+                     f'<p class="resumo">{e(", ".join(nao_publicadas))}. '
                      f'O localizador oficial dessas marcas não permite leitura '
                      f'automatizada, e não vamos contornar isso. Consulte direto '
-                     f'em <a href="{e(fonte_bloqueada["pagina"])}" '
-                     f'rel="nofollow noopener">'
-                     f'{e(fonte_bloqueada["titular"])}</a>.</p>')
+                     f'em <a href="{e(bloqueada["pagina"])}" '
+                     f'rel="nofollow noopener">{e(bloqueada["titular"])}</a>.</p>')
+
+        ld = [trilha_ld(trilha),
+              {"@context": "https://schema.org", "@type": "ItemList",
+               "name": "Marcas com assistência técnica autorizada no Brasil",
+               "numberOfItems": len(self.postos),
+               "itemListElement": [
+                   {"@type": "ListItem", "position": i,
+                    "url": SITE_URL + f"{RAIZ_MARCAS}/{m}/",
+                    "item": {"@type": "Brand", "name": MARCAS[m]["nome"]}}
+                   for i, m in enumerate(
+                       sorted(self.postos, key=lambda m: MARCAS[m]["nome"].lower()), 1)]}]
 
         corpo = (f"<h1>Assistência técnica autorizada por marca</h1>"
                  f'<p class="resumo">{e(resumo)}</p>'
-                 f'<p class="fonte">As redes por marca NÃO vêm da Receita '
-                 f'Federal: cada uma é a lista publicada pelo fabricante ou pelo '
-                 f'distribuidor oficial, e cada página diz qual é a origem e '
-                 f'quando foi consultada.</p>'
-                 + "".join(secoes) + aviso)
+                 f'<p class="fonte">Esta seção NÃO vem da Receita Federal: cada '
+                 f'rede é a lista publicada pelo fabricante ou pelo distribuidor '
+                 f'oficial, e cada página diz qual é a origem e quando foi '
+                 f'consultada.</p>'
+                 f'<h2>Todas as marcas, de A a Z</h2>'
+                 f'<p class="resumo">O nome menor é quem credencia a rede no '
+                 f'Brasil; o número é a quantidade de oficinas autorizadas.</p>'
+                 f'<ul class="lugares az">{az}</ul>'
+                 f'<h2>Quem credencia cada rede</h2>'
+                 + "".join(redes) + aviso)
         escrever(SITE / HUB.strip("/") / "index.html",
-                 shell(titulo=f"Assistência técnica autorizada por marca | {SITE_NOME}",
+                 shell(titulo=f"Assistência técnica autorizada por marca — "
+                              f"{len(self.postos)} marcas | {SITE_NOME}",
                        descricao=resumo, url=SITE_URL + HUB, corpo=corpo,
-                       css_nome=css_nome, trilha=trilha,
-                       jsonld=[trilha_ld(trilha)], vertical_atual=VERTICAL))
+                       css_nome=css_nome, trilha=trilha, jsonld=ld,
+                       vertical_atual=NAV_CHAVE))
         urls.append(HUB)
+
+    def _representante(self, fonte, pos=0) -> str:
+        """Marca que representa o distribuidor num exemplo. Prefere as
+        reconhecíveis; sem elas, a ordem alfabética do catálogo."""
+        desta = [m for m in marcas_da_fonte(fonte) if m in self.postos]
+        preferidas = [m for m in desta if MARCAS[m]["destaque"]] or desta
+        return preferidas[pos % len(preferidas)]
 
     # ----------------------------------------------------------- marca (Brasil)
     def _marca(self, marca, css_nome, urls) -> None:
@@ -380,7 +472,7 @@ class Marcas:
                   f"e {len(por_uf)} {'estado' if len(por_uf) == 1 else 'estados'}, "
                   f"com endereço e telefone.")
         trilha = [("Início", "/"), (ROTULO_VERTICAL, f"/{VERTICAL}/"),
-                  ("Marcas", HUB), (nome, None)]
+                  ("Por marca", HUB), (nome, None)]
 
         estados = "".join(
             f'<li><a href="{cam}{uf.lower()}/"><span>{e(UF_NOME.get(uf, uf))}</span>'
@@ -415,7 +507,7 @@ class Marcas:
                               f"Brasil | {SITE_NOME}",
                        descricao=resumo, url=SITE_URL + cam, corpo=corpo,
                        css_nome=css_nome, trilha=trilha, jsonld=ld,
-                       vertical_atual=VERTICAL))
+                       vertical_atual=NAV_CHAVE))
         urls.append(cam)
 
     # -------------------------------------------------------------- marca + UF
@@ -435,7 +527,7 @@ class Marcas:
                   f"{'cidade' if len(com_cidade) == 1 else 'cidades'}, com "
                   f"endereço e telefone de cada uma.")
         trilha = [("Início", "/"), (ROTULO_VERTICAL, f"/{VERTICAL}/"),
-                  ("Marcas", HUB), (nome, f"{RAIZ_MARCAS}/{marca}/"),
+                  ("Por marca", HUB), (nome, f"{RAIZ_MARCAS}/{marca}/"),
                   (nome_uf, None)]
         cidades = "".join(
             f'<li><a href="{cam}{s}/"><span>{e(self.nomes[(uf, s)])}</span>'
@@ -462,7 +554,7 @@ class Marcas:
                               f"rede autorizada | {SITE_NOME}",
                        descricao=resumo, url=SITE_URL + cam, corpo=corpo,
                        css_nome=css_nome, trilha=trilha, jsonld=ld,
-                       vertical_atual=VERTICAL))
+                       vertical_atual=NAV_CHAVE))
         urls.append(cam)
 
     # ---------------------------------------------------------- marca + cidade
@@ -477,7 +569,7 @@ class Marcas:
                   f"assistência técnica autorizada {nome} em {municipio} ({uf}), "
                   f"com endereço, telefone e e-mail.")
         trilha = [("Início", "/"), (ROTULO_VERTICAL, f"/{VERTICAL}/"),
-                  ("Marcas", HUB), (nome, f"{RAIZ_MARCAS}/{marca}/"),
+                  ("Por marca", HUB), (nome, f"{RAIZ_MARCAS}/{marca}/"),
                   (nome_uf, f"{RAIZ_MARCAS}/{marca}/{uf.lower()}/"),
                   (municipio, None)]
         ld = [trilha_ld(trilha),
@@ -520,5 +612,5 @@ class Marcas:
                               f"autorizada | {SITE_NOME}",
                        descricao=resumo, url=SITE_URL + cam, corpo=corpo,
                        css_nome=css_nome, trilha=trilha, jsonld=ld,
-                       vertical_atual=VERTICAL))
+                       vertical_atual=NAV_CHAVE))
         urls.append(cam)

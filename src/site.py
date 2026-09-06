@@ -26,9 +26,11 @@ from config import (POR_PAGINA, SAFRA, SAFRA_DATA, SITE, SITE_DESCRICAO,
                     SITE_EMAIL_CONTATO, SITE_NOME, SITE_URL, UF_EM, UF_NOME,
                     VERTICAIS)
 from db import conectar
+import site_marcas
 from site_marcas import carregar as carregar_marcas
-from site_moldura import (FONTE, e, escrever, num, paginas_escritas,
-                          preparar_ativos, shell, trilha_ld)
+from site_moldura import (FONTE, definir_nav, e, escrever, num,
+                          paginas_escritas, preparar_ativos, shell,
+                          trilha_ld)
 from site_tema import css_com_hash
 
 # A árvore por marca pendura só na assistência técnica: é a única vertical em
@@ -41,6 +43,13 @@ class _SemMarcas:
     disponivel = False
     bloco_cidade = staticmethod(lambda *a, **k: "")
     bloco_vertical = staticmethod(lambda *a, **k: "")
+    bloco_home = staticmethod(lambda *a, **k: "")
+
+
+# Numeral por extenso para a frase da home. Só até dez: acima disso o algarismo
+# lê melhor, e não há por que carregar uma biblioteca para isso.
+_EXTENSO = {1: "uma", 2: "duas", 3: "três", 4: "quatro", 5: "cinco",
+            6: "seis", 7: "sete", 8: "oito", 9: "nove", 10: "dez"}
 
 
 SEM_MARCAS = _SemMarcas()
@@ -233,14 +242,19 @@ def _pagina_vertical(*, vertical, por_uf, top_cidades, css_nome, urls, marcas):
     urls.append(cam)
 
 
-def _pagina_home(*, totais, css_nome, urls):
+def _pagina_home(*, totais, css_nome, urls, marcas):
     total = sum(t for t, _ in totais.values())
     cartoes = "".join(
         f'<li><a href="/{s}/"><strong>{e(VERTICAIS[s]["rotulo"])}</strong>'
         f'<span>{num(totais[s][0])} estabelecimentos em {num(totais[s][1])} cidades</span></a></li>'
         for s in VERTICAIS if s in totais)
+    # o número de áreas era fixo no texto e ficou errado quando entrou a sexta
+    areas = _EXTENSO.get(len(totais), str(len(totais)))
     resumo = (f"{num(total)} estabelecimentos com cadastro ativo na Receita Federal, "
-              f"organizados em cinco áreas de serviço, por cidade e estado.")
+              f"organizados em {areas} áreas de serviço, por cidade e estado."
+              + (f" Mais {num(marcas.oficinas())} oficinas de assistência "
+                 f"autorizada de {len(marcas.postos)} marcas."
+                 if marcas.disponivel else ""))
     trilha = [("Início", None)]
     ld = [{"@context": "https://schema.org", "@type": "WebSite",
            "name": SITE_NOME, "url": SITE_URL, "description": SITE_DESCRICAO,
@@ -249,7 +263,8 @@ def _pagina_home(*, totais, css_nome, urls):
     corpo = (f"<h1>{e(SITE_NOME)}</h1>"
              f'<p class="resumo">{e(SITE_DESCRICAO)} {e(resumo)}</p>'
              f'<p class="fonte">{e(FONTE)}</p>'
-             f'<ul class="verticais">{cartoes}</ul>')
+             f'<ul class="verticais">{cartoes}</ul>'
+             + marcas.bloco_home())
     escrever(SITE / "index.html",
               shell(titulo=f"{SITE_NOME} — instrumentos musicais, som e ensino por cidade",
                      descricao=resumo, url=SITE_URL + "/", corpo=corpo,
@@ -455,6 +470,11 @@ def gerar() -> int:
         return 1
     t0 = time.time()
     SITE.mkdir(parents=True, exist_ok=True)
+    # estatico/ é reescrito inteiro a cada execução (CSS, logotipo, favicons).
+    # Sem limpar, cada mudança de tema deixa o arquivo com o hash ANTIGO para
+    # trás — e o deploy publica os dois, porque só empacota o diretório.
+    for velho in sorted((SITE / "estatico").glob("*")):
+        velho.unlink()
     css_nome, css_texto = css_com_hash()
     escrever(SITE / "estatico" / css_nome, css_texto)
     preparar_ativos()
@@ -464,6 +484,18 @@ def gerar() -> int:
     if not marcas.disponivel:
         print("  aviso: sem redes por marca no banco -> rode "
               "'make coletar-marcas && make carregar-marcas'")
+
+    # O menu é montado uma vez, antes da primeira página. A categoria "por
+    # marca" entra logo depois da vertical em que vive, para a relação entre as
+    # duas ficar óbvia — e só entra se houver marca coletada, senão seria um
+    # item de menu apontando para 404.
+    itens_nav = [(s, v["rotulo"], f"/{s}/") for s, v in VERTICAIS.items()]
+    if marcas.disponivel:
+        pos = next(i for i, (s, _, _) in enumerate(itens_nav)
+                   if s == VERTICAL_MARCAS) + 1
+        itens_nav.insert(pos, (site_marcas.NAV_CHAVE, site_marcas.NAV_ROTULO,
+                               site_marcas.HUB))
+    definir_nav(itens_nav)
 
     urls, totais = [], {}
     colunas = [d[0] for d in con.execute("SELECT * FROM publicacao LIMIT 0").description]
@@ -522,7 +554,7 @@ def gerar() -> int:
               f"{num(len(marcas.cidades)):>6} cidades  "
               f"{num(paginas_escritas()):>7} arquivos até aqui", flush=True)
 
-    _pagina_home(totais=totais, css_nome=css_nome, urls=urls)
+    _pagina_home(totais=totais, css_nome=css_nome, urls=urls, marcas=marcas)
     _pagina_404(css_nome)
     n_sitemaps = _sitemaps(urls)
     _robots()

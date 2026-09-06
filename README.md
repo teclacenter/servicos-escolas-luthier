@@ -109,9 +109,18 @@ nada. Daí uma segunda árvore, cruzada com a primeira:
 /assistencia-tecnica/marca/roland/sp/campinas/     a marca em uma cidade
 ```
 
-São 4.992 páginas novas, a partir de **784 oficinas** de sete redes. Toda página
-de cidade da assistência técnica ganhou o bloco "por marca", e toda página de
-marca em uma cidade aponta de volta para a lista completa da cidade.
+São 4.992 páginas novas, a partir de **784 oficinas** de sete redes. "Assistência
+por marca" é uma **categoria no menu**, logo depois de "Assistência técnica", e
+tem seção própria na página inicial. Toda página de cidade da assistência técnica
+ganhou o bloco "por marca", e toda página de marca em uma cidade aponta de volta
+para a lista completa da cidade.
+
+O hub em `/assistencia-tecnica/marcas/` é um índice, não uma vitrine: a lista
+A-Z completa vem primeiro, com quem credencia a rede embaixo do nome e o número
+de oficinas ao lado — quem chega ali já sabe a marca e quer achá-la. A explicação
+das redes compartilhadas vem depois, em prosa, sem repetir as 43 marcas numa
+segunda lista. Não há ranking de "mais procuradas": não temos volume de busca, e
+inventar um seria o oposto do que o resto do projeto faz.
 
 ### As sete fontes, e como cada uma entrega
 

@@ -18,7 +18,8 @@ from config import (ATIVOS, FAVICON, LOGO, SAFRA, SITE, SITE_DESCRICAO,
 from site_tema import logo_svg, png_para_ico
 
 __all__ = ["UF_NOME", "FONTE", "e", "num", "escrever", "contar",
-           "paginas_escritas", "preparar_ativos", "shell", "q", "trilha_ld"]
+           "paginas_escritas", "preparar_ativos", "definir_nav", "shell",
+           "q", "trilha_ld"]
 
 FONTE = (f"Fonte: Cadastro Nacional da Pessoa Jurídica, Receita Federal do Brasil, "
          f"safra {SAFRA}. Somente estabelecimentos com situação cadastral ativa.")
@@ -140,12 +141,24 @@ def preparar_icones() -> str:
     return "".join(tags)
 
 
+# Itens do menu, em ordem. O padrão são as verticais; src/site.py substitui a
+# lista por uma que inclui a categoria "por marca", quando há marcas coletadas.
+# Cada item é (chave, rótulo, caminho) — a chave é o que shell(vertical_atual=)
+# compara para marcar o item corrente.
+_NAV = [(s, v["rotulo"], f"/{s}/") for s, v in VERTICAIS.items()]
+
+
+def definir_nav(itens) -> None:
+    global _NAV
+    _NAV = list(itens)
+
+
 def shell(*, titulo, descricao, url, corpo, css_nome, trilha=None,
            jsonld=None, prev=None, prox=None, vertical_atual=None) -> str:
     nav = "".join(
-        f'<li><a href="/{s}/"{" aria-current=\"page\"" if s == vertical_atual else ""}>'
-        f'{e(v["rotulo"])}</a></li>'
-        for s, v in VERTICAIS.items())
+        f'<li><a href="{caminho}"'
+        f'{" aria-current=\"page\"" if chave == vertical_atual else ""}>'
+        f'{e(rotulo)}</a></li>' for chave, rotulo, caminho in _NAV)
     trilha_html = ""
     if trilha:
         itens = "".join(

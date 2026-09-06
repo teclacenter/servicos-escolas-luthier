@@ -72,6 +72,10 @@ h2{{font-size:19px;margin:34px 0 12px;font-weight:600}}
   padding:9px 12px;border:1px solid var(--borda);border-radius:5px;color:var(--texto)}}
 .lugares a:hover{{border-color:var(--vermelho);color:var(--vermelho);text-decoration:none}}
 .lugares .n{{color:var(--cinza);font-size:13px;font-variant-numeric:tabular-nums}}
+/* índice A-Z das marcas: o nome em cima, quem credencia embaixo */
+.lugares.az a{{align-items:center}}
+.lugares small{{display:block;color:var(--cinza);font-size:11.5px;font-weight:400;
+  margin-top:1px}}
 
 /* cartões das verticais na home */
 .verticais{{display:grid;gap:16px;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));

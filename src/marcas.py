@@ -72,11 +72,12 @@ FONTES = {
 #   linhas   linhas de produto atendidas pela mesma rede (evita uma página
 #            quase idêntica por linha, que é o que a lista do fabricante sugere)
 #   sobre    o que a marca fabrica — só quando verificável na fonte oficial
-#   destaque a marca que representa a rede quando o distribuidor tem várias.
-#            Serve só para escolher o que citar em texto curto (chamada na home
-#            da vertical, llms.txt); não muda nenhuma página. Sem isso, o
-#            desempate seria alfabético e a ProShows apareceria representada por
-#            "Aston Microphones" em vez de Behringer.
+#   destaque marca reconhecível pelo nome, que vale listar em espaço curto (a
+#            seção na home, a chamada na página da vertical). Não muda nenhuma
+#            página de marca: todas as 43 têm a mesma árvore. Sem isso o
+#            desempate seria alfabético, e a home abriria com "Aston
+#            Microphones" em vez de Behringer. Quando é preciso UMA marca para
+#            representar o distribuidor, usa-se a primeira destaque dele.
 def _m(nome, fonte, *, aliases=(), linhas=(), sobre=None, destaque=False):
     return {"nome": nome, "fonte": fonte, "aliases": list(aliases),
             "linhas": list(linhas), "sobre": sobre, "destaque": destaque}
@@ -105,27 +106,27 @@ MARCAS = {
     "behringer": _m("Behringer", "proshows", destaque=True, sobre=(
         "mesas de som analógicas e digitais, interfaces de áudio, "
         "amplificadores, caixas acústicas e processadores de sinal")),
-    "midas": _m("Midas", "proshows", sobre=(
+    "midas": _m("Midas", "proshows", destaque=True, sobre=(
         "mesas de som digitais e pré-amplificadores de microfone para áudio "
         "profissional")),
     "klark-teknik": _m("Klark Teknik", "proshows", sobre=(
         "processadores de áudio, equalizadores e unidades de efeito")),
-    "tc-electronic": _m("TC Electronic", "proshows", aliases=["TC"], sobre=(
+    "tc-electronic": _m("TC Electronic", "proshows", aliases=["TC"], destaque=True, sobre=(
         "pedais de efeito, processadores de áudio e amplificação para "
         "instrumentos")),
     "turbosound": _m("Turbosound", "proshows", sobre=(
         "caixas acústicas e sistemas de sonorização")),
     "tannoy": _m("Tannoy", "proshows", sobre=(
         "caixas acústicas e monitores de estúdio")),
-    "marshall": _m("Marshall", "proshows", sobre=(
+    "marshall": _m("Marshall", "proshows", destaque=True, sobre=(
         "amplificadores e caixas para guitarra")),
-    "shure": _m("Shure", "proshows", sobre=(
+    "shure": _m("Shure", "proshows", destaque=True, sobre=(
         "microfones, sistemas sem fio e fones de ouvido")),
-    "novation": _m("Novation", "proshows", sobre=(
+    "novation": _m("Novation", "proshows", destaque=True, sobre=(
         "sintetizadores, controladores MIDI e controladores de grade")),
-    "focusrite": _m("Focusrite", "proshows", sobre=(
+    "focusrite": _m("Focusrite", "proshows", destaque=True, sobre=(
         "interfaces de áudio e pré-amplificadores de microfone")),
-    "hohner": _m("Hohner", "proshows", sobre=(
+    "hohner": _m("Hohner", "proshows", destaque=True, sobre=(
         "gaitas, acordeões e melódicas")),
     "aston-microphones": _m("Aston Microphones", "proshows", aliases=["Aston"],
                             sobre="microfones de estúdio"),
@@ -141,9 +142,9 @@ MARCAS = {
     # ---- rede Sonotec (idem: uma oficina para todo o portfólio)
     "takamine": _m("Takamine", "sonotec", destaque=True, sobre=(
         "violões e violões eletroacústicos")),
-    "gretsch": _m("Gretsch", "sonotec", sobre=("guitarras, baixos e baterias")),
+    "gretsch": _m("Gretsch", "sonotec", destaque=True, sobre=("guitarras, baixos e baterias")),
     "lp": _m("LP", "sonotec", aliases=["Latin Percussion", "LP Latin Percussion"],
-             sobre="instrumentos de percussão latina"),
+             destaque=True, sobre="instrumentos de percussão latina"),
     "karsect": _m("Karsect", "sonotec", sobre=(
         "microfones com fio e sistemas sem fio")),
     "strinberg": _m("Strinberg", "sonotec", sobre=(
