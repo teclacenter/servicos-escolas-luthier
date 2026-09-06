@@ -111,7 +111,8 @@ def test_site_candidato_so_para_dominio_proprio(con):
     ("+557388717829", "movel"),   # local começa em 8
     ("+557398765432", "movel"),
     ("+557366554433", "movel"),
-    ("+5573988717829", None),     # 9 dígitos: não existe nesta base
+    ("+5573988717829", "movel"),  # 9 dígitos: só móvel tem; vem das redes
+                                  # autorizadas, não da Receita
     (None,            None),
 ])
 def test_tipo_telefone(con, e164, esperado):
@@ -144,6 +145,11 @@ def test_linha_telefone_movel_traz_os_dois_formatos(con):
 
 def test_linha_telefone_fixo_sai_simples(con):
     assert um(con, "linha_telefone(?)", "+557336135835") == "Tel: (73) 3613-5835"
+
+
+def test_linha_telefone_movel_ja_com_nove_sai_uma_vez(con):
+    """Número das redes autorizadas já vem com o 9: não há 'original' ao lado."""
+    assert um(con, "linha_telefone(?)", "+5573988717829") == "Cel: (73) 98871-7829"
 
 
 @pytest.mark.parametrize("cep,esperado", [

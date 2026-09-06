@@ -7,6 +7,7 @@ import sys
 import time
 from pathlib import Path
 
+import carregar_marcas
 from config import EXTRAIDOS, RAIZ, SAIDA
 from db import conectar, executar_arquivo, log_contagem
 
@@ -139,6 +140,11 @@ def main() -> int:
                  "SELECT count(*) FROM estabelecimentos_alvo WHERE suspeita_duplicata")
     log_contagem(con, "  sem código IBGE",
                  "SELECT count(*) FROM estabelecimentos_alvo WHERE ibge IS NULL")
+
+    # Redes autorizadas por marca. Origem separada (o site de cada fabricante)
+    # e opcional: sem o CSV coletado, as tabelas saem vazias e o site fica como
+    # antes. Ver src/carregar_marcas.py.
+    carregar_marcas.carregar(con)
 
     print(f"carga concluída em {time.time() - t0:.0f}s")
     return 0

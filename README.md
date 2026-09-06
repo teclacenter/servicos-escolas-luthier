@@ -4,10 +4,17 @@ Transforma os arquivos abertos de CNPJ da Receita Federal em seis listas de
 estabelecimentos ativos, organizadas por estado e município, e gera o site
 estático publicado em <https://servicos.teclacenter.com.br>.
 
+Publica também a **rede de assistência autorizada de 43 marcas** — Roland,
+Yamaha, Casio, Korg, Tagima, Behringer, Shure, Takamine e outras — coletada do
+site oficial de cada fabricante ou distribuidor. Segunda origem de dados,
+independente da Receita.
+
 Pipeline determinístico: **nenhuma etapa chama IA**. Rodar `make all` duas vezes
 sobre a mesma safra produz saídas byte-a-byte idênticas (verificado por checksum).
-A única requisição de rede do projeto é a tabela de municípios do IBGE
-(`src/ibge_para_csv.py`), necessária porque a base da Receita não traz código IBGE.
+As duas etapas que tocam a rede ficam **fora de `make all`**, justamente para que
+`all` continue reprodutível offline: a tabela de municípios do IBGE
+(`src/ibge_para_csv.py`) e a coleta das redes por marca
+(`make coletar-marcas`), cujo produto é um CSV versionado.
 
 ## Verticais
 
@@ -46,9 +53,11 @@ make servir       # http://localhost:8788
 | `relatorio` | `saida/relatorio-base.md` |
 | `exportar` | `saida/csv/*.csv`, `saida/parquet/*.parquet`, agregados por cidade |
 | `publicar` | `saida/publicacao.sqlite`, indexado por vertical + UF + cidade |
+| `coletar-marcas` | rede autorizada de cada marca -> `dados-referencia/marcas-autorizadas.csv` (**rede**) |
+| `carregar-marcas` | põe esse CSV no banco; segundos, sem refazer a base da RFB |
 | `site` | site estático em `site/` |
 | `deploy` | publica `site/` em produção (configure `deploy.env`) |
-| `testes` | 95 testes das macros de normalização e apresentação |
+| `testes` | 130 testes: macros de normalização, coleta por marca e casamento de município |
 | `auditar-bytes` | lista os bytes de controle presentes nos arquivos brutos |
 
 ## Armadilhas dos dados, todas tratadas
@@ -86,6 +95,90 @@ make servir       # http://localhost:8788
 9. **No macOS, `tar` injeta um arquivo `._*` por arquivo e diretório.** Sem
    `COPYFILE_DISABLE=1`, o deploy sobe 89.523 arquivos em vez de 29.843.
 
+## Assistência técnica por marca
+
+Quem quebrou um teclado não procura "assistência técnica em Campinas": procura
+"assistência técnica Roland" e, no máximo, "assistência técnica Roland São
+Paulo". A árvore por cidade responde a segunda pergunta pela metade e a primeira,
+nada. Daí uma segunda árvore, cruzada com a primeira:
+
+```
+/assistencia-tecnica/marcas/                       as 43 marcas, por distribuidor
+/assistencia-tecnica/marca/roland/                 a marca no Brasil
+/assistencia-tecnica/marca/roland/sp/              a marca em um estado
+/assistencia-tecnica/marca/roland/sp/campinas/     a marca em uma cidade
+```
+
+São 4.992 páginas novas, a partir de **784 oficinas** de sete redes. Toda página
+de cidade da assistência técnica ganhou o bloco "por marca", e toda página de
+marca em uma cidade aponta de volta para a lista completa da cidade.
+
+### As sete fontes, e como cada uma entrega
+
+| Fonte | Marcas | Oficinas | Como sai |
+|---|---:|---:|---|
+| Yamaha Musical do Brasil | 1 | 165 | JSON do próprio localizador |
+| Tagima | 1 | 164 | HTML renderizado no servidor, um estado por requisição |
+| ProShows | 19 | 149 | Master Data da VTEX; 403 sem filtro de estado |
+| Sonotec | 19 | 128 | página única, um bloco por estado |
+| Tectrônica (Korg) | 1 | 70 | página única com `data-estado`/`data-cidade` |
+| Roland Brasil | 1 | 65 | `.php` embutido que chama outro `.php` por estado |
+| Casio | 1 | 43 | JSON; o Akamai exige `Referer` |
+
+**Harman (JBL, AKG, Harman Kardon, Infinity, Lexicon, Mark Levinson, Revel) não
+é coletada.** O localizador está atrás de um antibot que exige executar
+JavaScript; contornar isso seria burlar um controle de acesso. A fonte fica
+declarada em `src/marcas.py` com o motivo, e o hub de marcas diz ao visitante
+para consultar direto na Harman.
+
+### Decisões que valem explicar
+
+1. **Uma fonte, N marcas, uma rede só.** ProShows e Sonotec credenciam a MESMA
+   oficina para todo o portfólio — e nenhuma das duas publica qual oficina
+   atende qual marca. A relação (oficina × marca) é, portanto, *derivada da
+   fonte*, não coletada. As páginas dizem isso na cara, nomeando o distribuidor
+   e listando as marcas irmãs: a lista de Behringer e a de Midas serem idênticas
+   é o fato, não um truque de SEO.
+2. **O casamento da cidade usa a tabela `municipios`**, a mesma que define os
+   slugs das URLs. Casar contra outra tabela produziria
+   `/marca/roland/sp/sao-paulo/` apontando para uma cidade que a navegação não
+   tem. 770 das 784 oficinas casam.
+3. **Yamaha não publica cidade nem estado**, só um endereço em texto corrido. O
+   estado sai da sigla escrita no fim do endereço (declaração da fonte) e, se
+   não houver, do DDD (inferência nossa, nessa ordem). A cidade sai do nome de
+   município da mesma UF encontrado no endereço, preferindo o casamento mais à
+   direita — `RUA SÃO PAULO, 45 - CENTRO - CAMPINAS, SP` é Campinas. Nome de
+   três letras (`Jaú`, `Ipê`) só vale se fechar o endereço.
+4. **Cidade que não casa não é chutada.** `Alagoinha` não vira `Alagoinhas`: a
+   oficina fica na página do estado, e a lista dos casos sai em
+   `marca_posto_sem_municipio`.
+5. **276 oficinas foram casadas com um CNPJ ativo da própria base**, pelo
+   telefone, e só quando o casamento é inequívoco (um telefone que aponta para
+   exatamente um estabelecimento). Muda o que a página pode afirmar: em vez de
+   "a Roland indica esta oficina", vira "a Roland indica esta oficina, que é a
+   empresa X, CNPJ Y, com cadastro ativo".
+6. **O telefone das redes já vem com o nono dígito**, ao contrário do da
+   Receita. `tipo_telefone` foi generalizada para classificar os dois formatos,
+   e `linha_telefone` deixou de imprimir "ou (o mesmo número)" quando não há um
+   formato antigo diferente.
+7. **Cada página cita a origem**: quem publica a rede, o endereço da página
+   oficial e a data em que foi consultada (`coletado_em`, por fonte — coletar só
+   a Roland hoje não faz o site dizer que a rede da Yamaha foi conferida hoje).
+
+### Recoletar
+
+```bash
+make coletar-marcas                       # todas as fontes (~2 min)
+$(PY) src/coletar_marcas.py --fonte roland   # só uma, mesclando com o resto
+$(PY) src/coletar_marcas.py --reusar         # reparseia tmp/marcas/, sem rede
+make carregar-marcas && make site
+```
+
+O HTML e o JSON crus ficam em `tmp/marcas/`, um arquivo por requisição, para
+auditar de onde saiu cada linha sem repetir a coleta. O CSV sai ordenado e
+deduplicado, com um `posto_id` derivado do conteúdo: entre duas coletas, o diff
+mostra só o que a fonte mudou.
+
 ## Site
 
 Estático, sem JavaScript, sem webfont, sem imagem externa além do logotipo.
@@ -96,8 +189,11 @@ SEO: `<title>` e `<meta description>` únicos por página, canonical, `prev`/`ne
 na paginação, `sitemap.xml` fragmentado, JSON-LD `BreadcrumbList` + `ItemList` de
 `LocalBusiness`, HTML semântico (`<address>`, `tel:`, `mailto:`).
 
-GEO: `llms.txt` na raiz descrevendo o conjunto e os limites do dado, frase-resumo
-factual no topo de cada página, e os mesmos dados em JSON-LD.
+GEO: `llms.txt` na raiz descrevendo as duas origens e os limites de cada uma,
+frase-resumo factual no topo de cada página, e os mesmos dados em JSON-LD. Nas
+páginas por marca, o JSON-LD traz `Brand` e, em cada oficina, um
+`Offer`/`Service` com a marca atendida — que é o que um motor de resposta lê sem
+ambiguidade quando alguém pergunta "onde consertar um teclado Roland em Campinas".
 
 Marca e paleta em `PALETA`, em `src/config.py`. O vermelho (`#ca1010`) e o cinza
 (`#a9abae`) foram amostrados dos pixels do próprio logotipo em `ativos/`.
@@ -106,9 +202,13 @@ Marca e paleta em `PALETA`, em `src/config.py`. O vermelho (`#ca1010`) e o cinza
 
 ```
 ativos/            logotipo (fonte, versionado)
-dados-referencia/  tabela de municípios do IBGE
+dados-referencia/  tabela de municípios do IBGE e as redes por marca (CSV versionado)
 sql/               SQL versionado, em arquivos, não em strings Python
 src/               etapas do pipeline
+                   marcas.py            catálogo marca -> distribuidor -> URL oficial
+                   coletar_marcas.py    a coleta (rede)
+                   site_moldura.py      <head>, cabeçalho e rodapé, comuns
+                   site_marcas.py       as páginas por marca
 tests/             testes das macros
 Receita-cnpj-dados/  entrada bruta (gitignore)
 extraidos/         CSV em UTF-8 (gitignore)
@@ -127,3 +227,6 @@ site/              site gerado (gitignore)
 - `suspeita_duplicata` apenas marca (mesmo CEP, logradouro e número, com nome de
   similaridade Jaro-Winkler ≥ 0,90). Nunca apaga, e não aparece no site.
 - Sem geocodificação: `lat`/`lng` existem e estão nulos.
+- As redes por marca são dados de empresa publicados pelo próprio fabricante
+  para que o consumidor encontre a assistência. Cada página nomeia a origem,
+  linka a página oficial e diz que a lista oficial é a do fabricante.

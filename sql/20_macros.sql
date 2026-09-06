@@ -100,11 +100,15 @@ CREATE OR REPLACE MACRO cep_formatado(cep) AS (
 -- Tipo do telefone, a partir do primeiro dígito do número local.
 -- FATO MEDIDO na safra D60808: a RFB guarda no máximo 8 dígitos e a base tem
 -- ZERO números de 9 dígitos. Celular brasileiro tem 9 dígitos desde 2016, logo
--- todo móvel aqui está no formato anterior à migração.
+-- todo móvel VINDO DA RECEITA está no formato anterior à migração.
 -- Numeração brasileira: local começando em 2-5 = linha fixa; 6-9 = móvel.
+-- O caso de 9 dígitos existe na outra origem de dados do projeto — as redes de
+-- assistência autorizada, que publicam o número atual — e só pode ser móvel:
+-- linha fixa nunca ganhou o nono dígito.
 CREATE OR REPLACE MACRO tipo_telefone(e164) AS (
     WITH x AS (SELECT so_digitos(e164) AS d)
     SELECT CASE
+        WHEN length(d) = 13 THEN 'movel'                -- 55 + DDD(2) + 9 dígitos
         WHEN length(d) <> 12 THEN NULL                  -- 55 + DDD(2) + 8 dígitos
         WHEN d[5:5] IN ('2','3','4','5') THEN 'fixo'
         WHEN d[5:5] IN ('6','7','8','9') THEN 'movel'
@@ -131,13 +135,16 @@ CREATE OR REPLACE MACRO telefone_exibicao(e164) AS (
     END FROM x
 );
 
--- Linha de telefone da ficha. Fixo sai direto; móvel sai nos DOIS formatos,
--- o com 9 primeiro (é o que disca hoje) e o original ao lado.
+-- Linha de telefone da ficha. Fixo sai direto; móvel de 8 dígitos sai nos DOIS
+-- formatos, o com 9 primeiro (é o que disca hoje) e o original ao lado. Móvel
+-- que já veio com 9 dígitos sai uma vez só — não há um "original" diferente.
 CREATE OR REPLACE MACRO linha_telefone(e164) AS
     CASE tipo_telefone(e164)
         WHEN 'fixo'  THEN 'Tel: ' || telefone_exibicao(e164)
-        WHEN 'movel' THEN 'Cel: ' || telefone_exibicao(telefone_com_nono_digito(e164))
-                          || ' ou ' || telefone_exibicao(e164)
+        WHEN 'movel' THEN 'Cel: ' || coalesce(
+              telefone_exibicao(telefone_com_nono_digito(e164)) || ' ou ' ||
+              telefone_exibicao(e164),
+              telefone_exibicao(e164))
     END;
 
 -- tipo_logradouro + logradouro sem repetir o tipo. A RFB grava, no mesmo

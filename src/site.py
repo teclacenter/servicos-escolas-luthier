@@ -14,203 +14,36 @@ HTML semântico (<address>, tel:, mailto:).
 GEO (ser citado por motor de resposta): llms.txt na raiz descrevendo o conjunto,
 uma frase-resumo factual no topo de cada página com número e fonte, e os mesmos
 dados em JSON-LD — que é o que os rastreadores de LLM leem sem ambiguidade.
+
+A moldura das páginas (<head>, cabeçalho, rodapé) mora em site_moldura.py, e as
+páginas por marca em site_marcas.py — os dois geradores compartilham a moldura.
 """
-import html
 import json
-import os
 import sys
 import time
-from pathlib import Path
 
-from config import (ATIVOS, FAVICON, LOGO, POR_PAGINA, SAFRA, SAFRA_DATA, SITE,
-                    SITE_DESCRICAO, SITE_EMAIL_CONTATO, SITE_NOME, SITE_URL,
+from config import (POR_PAGINA, SAFRA, SAFRA_DATA, SITE, SITE_DESCRICAO,
+                    SITE_EMAIL_CONTATO, SITE_NOME, SITE_URL, UF_EM, UF_NOME,
                     VERTICAIS)
 from db import conectar
-from site_tema import css_com_hash, logo_svg, png_para_ico
+from site_marcas import carregar as carregar_marcas
+from site_moldura import (FONTE, e, escrever, num, paginas_escritas,
+                          preparar_ativos, shell, trilha_ld)
+from site_tema import css_com_hash
 
-UF_NOME = {
-    "AC": "Acre", "AL": "Alagoas", "AM": "Amazonas", "AP": "Amapá", "BA": "Bahia",
-    "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo", "GO": "Goiás",
-    "MA": "Maranhão", "MG": "Minas Gerais", "MS": "Mato Grosso do Sul",
-    "MT": "Mato Grosso", "PA": "Pará", "PB": "Paraíba", "PE": "Pernambuco",
-    "PI": "Piauí", "PR": "Paraná", "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte",
-    "RO": "Rondônia", "RR": "Roraima", "RS": "Rio Grande do Sul",
-    "SC": "Santa Catarina", "SE": "Sergipe", "SP": "São Paulo", "TO": "Tocantins",
-}
-FONTE = (f"Fonte: Cadastro Nacional da Pessoa Jurídica, Receita Federal do Brasil, "
-         f"safra {SAFRA}. Somente estabelecimentos com situação cadastral ativa.")
-
-e = html.escape
-_paginas_escritas = 0
+# A árvore por marca pendura só na assistência técnica: é a única vertical em
+# que a pergunta "de que marca?" faz sentido.
+VERTICAL_MARCAS = "assistencia-tecnica"
 
 
-def _num(v) -> str:
-    return f"{v:,}".replace(",", ".")
+class _SemMarcas:
+    """Objeto nulo para as outras verticais: mesma interface, nada a renderizar."""
+    disponivel = False
+    bloco_cidade = staticmethod(lambda *a, **k: "")
+    bloco_vertical = staticmethod(lambda *a, **k: "")
 
 
-def _escrever(caminho: Path, conteudo: str) -> None:
-    global _paginas_escritas
-    caminho.parent.mkdir(parents=True, exist_ok=True)
-    caminho.write_text(conteudo, encoding="utf-8")
-    _paginas_escritas += 1
-
-
-# --------------------------------------------------------------------- moldura
-def _dim_png(caminho: Path):
-    """Largura e altura do IHDR. Sem PIL: só os 24 primeiros bytes do arquivo."""
-    import struct
-    with caminho.open("rb") as fh:
-        cab = fh.read(24)
-    if cab[:8] != b"\x89PNG\r\n\x1a\n":
-        return None
-    return struct.unpack(">II", cab[16:24])
-
-
-def _preparar_marca() -> str:
-    """Copia ativos/ para site/estatico/ e devolve o HTML do logotipo.
-
-    O arquivo de marca vive em ativos/, FORA de site/, porque site/ é saída
-    gerada e um 'make limpar-site' apagaria o logotipo junto. Chamada uma vez
-    por execução: o HTML resultante é reusado nas 25 mil páginas.
-    """
-    destino = SITE / "estatico"
-    destino.mkdir(parents=True, exist_ok=True)
-    logo = ATIVOS / LOGO
-    if not logo.exists():
-        print(f"  aviso: {logo} não existe -> usando o logotipo SVG reconstruído")
-        return logo_svg()
-    destino_logo = destino / logo.name
-    destino_logo.write_bytes(logo.read_bytes())
-    dim = _dim_png(logo)
-    # width/height explícitos evitam deslocamento de layout (CLS) no carregamento;
-    # o logo está acima da dobra, então NÃO é lazy.
-    tam = f' width="{dim[0]}" height="{dim[1]}"' if dim else ""
-    return (f'<img src="/estatico/{logo.name}" alt="{e(SITE_NOME)}"{tam} '
-            f'decoding="async" fetchpriority="high">')
-
-
-_MARCA = ""
-_ICONES = ""
-
-
-def _marca() -> str:
-    return _MARCA
-
-
-def _preparar_icones() -> str:
-    """Copia o favicon, gera /favicon.ico e devolve as tags <link> do <head>.
-
-    O PNG vai com hash no nome, para poder ter cache imutável. O .ico fica na
-    raiz com nome fixo, porque é o caminho que o navegador pede sozinho: cache
-    mais curto, já que o nome não pode mudar.
-    """
-    import hashlib
-
-    origem = ATIVOS / FAVICON
-    if not origem.exists():
-        print(f"  aviso: {origem} não existe -> site sem favicon")
-        return ""
-    png = origem.read_bytes()
-    h = hashlib.sha256(png).hexdigest()[:10]
-    nome = f"favicon.{h}.png"
-    (SITE / "estatico" / nome).write_bytes(png)
-    _paginas_contar()
-
-    # /favicon.ico: o navegador pede este caminho mesmo com <link rel="icon">.
-    # Sem o arquivo, todo primeiro acesso vira um 404 no log.
-    try:
-        (SITE / "favicon.ico").write_bytes(png_para_ico(png))
-        _paginas_contar()
-    except ValueError as erro:
-        print(f"  aviso: favicon.ico não gerado ({erro})")
-
-    tags = [f'<link rel="icon" type="image/png" href="/estatico/{nome}">']
-    # Tamanhos extras, se existirem. Ninguém precisa criá-los: são opcionais.
-    for arquivo, rel, tam in (("favicon-180.png", "apple-touch-icon", "180x180"),
-                              ("favicon-512.png", "icon", "512x512")):
-        extra = ATIVOS / arquivo
-        if not extra.exists():
-            continue
-        dados = extra.read_bytes()
-        he = hashlib.sha256(dados).hexdigest()[:10]
-        alvo = f"{arquivo.removesuffix('.png')}.{he}.png"
-        (SITE / "estatico" / alvo).write_bytes(dados)
-        _paginas_contar()
-        tags.append(f'<link rel="{rel}" sizes="{tam}" href="/estatico/{alvo}">')
-    return "".join(tags)
-
-
-def _paginas_contar() -> None:
-    global _paginas_escritas
-    _paginas_escritas += 1
-
-
-def _shell(*, titulo, descricao, url, corpo, css_nome, trilha=None,
-           jsonld=None, prev=None, prox=None, vertical_atual=None) -> str:
-    nav = "".join(
-        f'<li><a href="/{s}/"{" aria-current=\"page\"" if s == vertical_atual else ""}>'
-        f'{e(v["rotulo"])}</a></li>'
-        for s, v in VERTICAIS.items())
-    trilha_html = ""
-    if trilha:
-        itens = "".join(
-            f"<li>{f'<a href={_q(u)}>{e(r)}</a>' if u else e(r)}</li>" for r, u in trilha)
-        trilha_html = f'<nav class="trilha" aria-label="Trilha de navegação"><ol>{itens}</ol></nav>'
-    ld = "".join(
-        f'<script type="application/ld+json">{json.dumps(b, ensure_ascii=False, separators=(",", ":"))}</script>'
-        for b in (jsonld or []))
-    rel = ""
-    if prev:
-        rel += f'<link rel="prev" href="{e(prev)}">'
-    if prox:
-        rel += f'<link rel="next" href="{e(prox)}">'
-    return f"""<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{e(titulo)}</title>
-<meta name="description" content="{e(descricao)}">
-<link rel="canonical" href="{e(url)}">{rel}
-<meta property="og:type" content="website">
-<meta property="og:site_name" content="{e(SITE_NOME)}">
-<meta property="og:title" content="{e(titulo)}">
-<meta property="og:description" content="{e(descricao)}">
-<meta property="og:url" content="{e(url)}">
-<meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large">
-<link rel="stylesheet" href="/estatico/{css_nome}">
-{_ICONES}
-{ld}</head>
-<body>
-<header class="topo"><div class="env"><a class="marca" href="/" aria-label="{e(SITE_NOME)} — início">{_marca()}</a></div></header>
-<nav class="nav" aria-label="Verticais"><ul>{nav}</ul></nav>
-<div class="env">{trilha_html}
-<main>
-{corpo}
-</main>
-</div>
-<footer class="rodape"><div class="env">
-<p><strong>{e(SITE_NOME)}</strong> — {e(SITE_DESCRICAO)}</p>
-<p>{e(FONTE)} Os dados são públicos e reproduzem o cadastro na data da safra; não
-verificamos se a empresa continua em atividade nem o que ela atende.</p>
-<p>Para correção ou remoção de um registro, escreva para
-<a href="mailto:{e(SITE_EMAIL_CONTATO)}">{e(SITE_EMAIL_CONTATO)}</a>.</p>
-</div></footer>
-</body>
-</html>
-"""
-
-
-def _q(u: str) -> str:
-    return '"' + e(u) + '"'
-
-
-def _trilha_ld(trilha) -> dict:
-    return {"@context": "https://schema.org", "@type": "BreadcrumbList",
-            "itemListElement": [
-                {"@type": "ListItem", "position": i, "name": r,
-                 **({"item": SITE_URL + u} if u else {})}
-                for i, (r, u) in enumerate(trilha, 1)]}
+SEM_MARCAS = _SemMarcas()
 
 
 # ----------------------------------------------------------------------- ficha
@@ -281,7 +114,7 @@ def _ficha_ld(r, pos) -> dict:
 
 
 # --------------------------------------------------------------------- páginas
-def _pagina_cidade(*, vertical, uf, mun, slug, ibge, linhas, css_nome, urls):
+def _pagina_cidade(*, vertical, uf, mun, slug, ibge, linhas, css_nome, urls, marcas):
     v = VERTICAIS[vertical]
     total = len(linhas)
     base = f"/{vertical}/{uf.lower()}/{slug}/"
@@ -294,16 +127,16 @@ def _pagina_cidade(*, vertical, uf, mun, slug, ibge, linhas, css_nome, urls):
         titulo = f"{v['rotulo']} em {mun}, {uf}{sufixo} | {SITE_NOME}"
         # frase-resumo factual: é o que um motor de resposta cita
         n_principal = sum(1 for x in linhas if x.get("origem_cnae") == "principal")
-        resumo = (f"{_num(total)} {'estabelecimento' if total == 1 else 'estabelecimentos'} "
+        resumo = (f"{num(total)} {'estabelecimento' if total == 1 else 'estabelecimentos'} "
                   f"de {v['curto']} com cadastro ativo em {mun} ({uf}), "
                   f"com endereço, telefone e e-mail. "
-                  + (f"{_num(n_principal)} "
+                  + (f"{num(n_principal)} "
                      f"{'declara' if n_principal == 1 else 'declaram'} esta como "
                      f"atividade principal." if n_principal
                      else "Todos declaram a atividade como secundária."))
         trilha = [("Início", "/"), (v["rotulo"], f"/{vertical}/"),
                   (UF_NOME.get(uf, uf), f"/{vertical}/{uf.lower()}/"), (mun, None)]
-        ld = [_trilha_ld(trilha),
+        ld = [trilha_ld(trilha),
               {"@context": "https://schema.org", "@type": "ItemList",
                "name": f"{v['rotulo']} em {mun}, {uf}",
                "numberOfItems": total,
@@ -330,9 +163,12 @@ def _pagina_cidade(*, vertical, uf, mun, slug, ibge, linhas, css_nome, urls):
                  + (f" Código IBGE do município: {e(ibge)}." if ibge else "")
                  + "</p>"
                  f'<ul class="fichas">{"".join(_ficha(r) for r in fatia)}</ul>'
-                 + pag)
-        _escrever(SITE / cam.strip("/") / "index.html",
-                  _shell(titulo=titulo, descricao=resumo, url=url, corpo=corpo,
+                 + pag
+                 # Só na primeira página: nas seguintes seria o mesmo bloco
+                 # repetido, e a página 2 não é a que compete pela busca.
+                 + (marcas.bloco_cidade(uf, slug, mun) if p == 1 else ""))
+        escrever(SITE / cam.strip("/") / "index.html",
+                  shell(titulo=titulo, descricao=resumo, url=url, corpo=corpo,
                          css_nome=css_nome, trilha=trilha, jsonld=ld,
                          vertical_atual=vertical,
                          prev=(SITE_URL + (base if p == 2 else f"{base}{p-1}/")) if p > 1 else None,
@@ -345,53 +181,55 @@ def _pagina_uf(*, vertical, uf, cidades, css_nome, urls):
     total = sum(c[2] for c in cidades)
     nome_uf = UF_NOME.get(uf, uf)
     cam = f"/{vertical}/{uf.lower()}/"
-    resumo = (f"{_num(total)} estabelecimentos de {v['curto']} com cadastro ativo em "
-              f"{_num(len(cidades))} {'cidade' if len(cidades) == 1 else 'cidades'} "
+    em_uf = UF_EM.get(uf, f"em {nome_uf}")
+    resumo = (f"{num(total)} estabelecimentos de {v['curto']} com cadastro ativo em "
+              f"{num(len(cidades))} {'cidade' if len(cidades) == 1 else 'cidades'} "
               f"de {nome_uf}.")
     trilha = [("Início", "/"), (v["rotulo"], f"/{vertical}/"), (nome_uf, None)]
     itens = "".join(
         f'<li><a href="/{vertical}/{uf.lower()}/{slug}/">'
-        f'<span>{e(mun)}</span><span class="n">{_num(n)}</span></a></li>'
+        f'<span>{e(mun)}</span><span class="n">{num(n)}</span></a></li>'
         for mun, slug, n in cidades)
-    corpo = (f"<h1>{e(v['h1'])} em {e(nome_uf)}</h1>"
+    corpo = (f"<h1>{e(v['h1'])} {e(em_uf)}</h1>"
              f'<p class="resumo">{e(resumo)}</p>'
              f'<p class="fonte">{e(FONTE)}</p>'
              f"<h2>Cidades de {e(nome_uf)}</h2>"
              f'<ul class="lugares">{itens}</ul>')
-    _escrever(SITE / cam.strip("/") / "index.html",
-              _shell(titulo=f"{v['rotulo']} em {nome_uf} | {SITE_NOME}",
+    escrever(SITE / cam.strip("/") / "index.html",
+              shell(titulo=f"{v['rotulo']} {em_uf} ({uf}) | {SITE_NOME}",
                      descricao=resumo, url=SITE_URL + cam, corpo=corpo,
                      css_nome=css_nome, trilha=trilha,
-                     jsonld=[_trilha_ld(trilha)], vertical_atual=vertical))
+                     jsonld=[trilha_ld(trilha)], vertical_atual=vertical))
     urls.append(cam)
 
 
-def _pagina_vertical(*, vertical, por_uf, top_cidades, css_nome, urls):
+def _pagina_vertical(*, vertical, por_uf, top_cidades, css_nome, urls, marcas):
     v = VERTICAIS[vertical]
     total = sum(n for _, n, _ in por_uf)
     cidades = sum(c for _, _, c in por_uf)
     cam = f"/{vertical}/"
-    resumo = (f"{_num(total)} estabelecimentos de {v['curto']} com cadastro ativo no "
-              f"Brasil, em {_num(cidades)} cidades e {len(por_uf)} estados.")
+    resumo = (f"{num(total)} estabelecimentos de {v['curto']} com cadastro ativo no "
+              f"Brasil, em {num(cidades)} cidades e {len(por_uf)} estados.")
     trilha = [("Início", "/"), (v["rotulo"], None)]
     ufs = "".join(
         f'<li><a href="/{vertical}/{uf.lower()}/">'
-        f'<span>{e(UF_NOME.get(uf, uf))}</span><span class="n">{_num(n)}</span></a></li>'
+        f'<span>{e(UF_NOME.get(uf, uf))}</span><span class="n">{num(n)}</span></a></li>'
         for uf, n, _ in por_uf)
     tops = "".join(
         f'<li><a href="/{vertical}/{uf.lower()}/{slug}/">'
-        f'<span>{e(mun)} - {e(uf)}</span><span class="n">{_num(n)}</span></a></li>'
+        f'<span>{e(mun)} - {e(uf)}</span><span class="n">{num(n)}</span></a></li>'
         for uf, mun, slug, n in top_cidades)
     corpo = (f"<h1>{e(v['h1'])} no Brasil</h1>"
              f'<p class="resumo">{e(resumo)}</p>'
              f'<p class="fonte">{e(FONTE)}</p>'
              f"<h2>Maiores cidades</h2><ul class=\"lugares\">{tops}</ul>"
-             f"<h2>Todos os estados</h2><ul class=\"lugares\">{ufs}</ul>")
-    _escrever(SITE / cam.strip("/") / "index.html",
-              _shell(titulo=f"{v['rotulo']} no Brasil, por cidade | {SITE_NOME}",
+             f"<h2>Todos os estados</h2><ul class=\"lugares\">{ufs}</ul>"
+             + marcas.bloco_vertical())
+    escrever(SITE / cam.strip("/") / "index.html",
+              shell(titulo=f"{v['rotulo']} no Brasil, por cidade | {SITE_NOME}",
                      descricao=resumo, url=SITE_URL + cam, corpo=corpo,
                      css_nome=css_nome, trilha=trilha,
-                     jsonld=[_trilha_ld(trilha)], vertical_atual=vertical))
+                     jsonld=[trilha_ld(trilha)], vertical_atual=vertical))
     urls.append(cam)
 
 
@@ -399,21 +237,21 @@ def _pagina_home(*, totais, css_nome, urls):
     total = sum(t for t, _ in totais.values())
     cartoes = "".join(
         f'<li><a href="/{s}/"><strong>{e(VERTICAIS[s]["rotulo"])}</strong>'
-        f'<span>{_num(totais[s][0])} estabelecimentos em {_num(totais[s][1])} cidades</span></a></li>'
+        f'<span>{num(totais[s][0])} estabelecimentos em {num(totais[s][1])} cidades</span></a></li>'
         for s in VERTICAIS if s in totais)
-    resumo = (f"{_num(total)} estabelecimentos com cadastro ativo na Receita Federal, "
+    resumo = (f"{num(total)} estabelecimentos com cadastro ativo na Receita Federal, "
               f"organizados em cinco áreas de serviço, por cidade e estado.")
     trilha = [("Início", None)]
     ld = [{"@context": "https://schema.org", "@type": "WebSite",
            "name": SITE_NOME, "url": SITE_URL, "description": SITE_DESCRICAO,
            "inLanguage": "pt-BR"},
-          _trilha_ld(trilha)]
+          trilha_ld(trilha)]
     corpo = (f"<h1>{e(SITE_NOME)}</h1>"
              f'<p class="resumo">{e(SITE_DESCRICAO)} {e(resumo)}</p>'
              f'<p class="fonte">{e(FONTE)}</p>'
              f'<ul class="verticais">{cartoes}</ul>')
-    _escrever(SITE / "index.html",
-              _shell(titulo=f"{SITE_NOME} — instrumentos musicais, som e ensino por cidade",
+    escrever(SITE / "index.html",
+              shell(titulo=f"{SITE_NOME} — instrumentos musicais, som e ensino por cidade",
                      descricao=resumo, url=SITE_URL + "/", corpo=corpo,
                      css_nome=css_nome, trilha=None, jsonld=ld))
     urls.append("/")
@@ -429,14 +267,14 @@ def _sitemaps(urls) -> None:
         corpo = "".join(
             f"<url><loc>{e(SITE_URL + u)}</loc><lastmod>{SAFRA_DATA}</lastmod>"
             f"<changefreq>monthly</changefreq></url>" for u in fatia)
-        _escrever(SITE / f"sitemap-{i}.xml",
+        escrever(SITE / f"sitemap-{i}.xml",
                   '<?xml version="1.0" encoding="UTF-8"?>'
                   '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
                   f"{corpo}</urlset>")
     indice = "".join(
         f"<sitemap><loc>{SITE_URL}/sitemap-{i}.xml</loc>"
         f"<lastmod>{SAFRA_DATA}</lastmod></sitemap>" for i in range(1, len(fatias) + 1))
-    _escrever(SITE / "sitemap.xml",
+    escrever(SITE / "sitemap.xml",
               '<?xml version="1.0" encoding="UTF-8"?>'
               '<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
               f"{indice}</sitemapindex>")
@@ -444,7 +282,7 @@ def _sitemaps(urls) -> None:
 
 
 def _robots() -> None:
-    _escrever(SITE / "robots.txt",
+    escrever(SITE / "robots.txt",
               "User-agent: *\n"
               "Allow: /\n"
               "\n"
@@ -459,7 +297,7 @@ def _robots() -> None:
               f"Sitemap: {SITE_URL}/sitemap.xml\n")
 
 
-def _llms_txt(totais) -> None:
+def _llms_txt(totais, marcas) -> None:
     """llms.txt — resumo do conjunto para motor de resposta.
 
     É o equivalente do robots.txt para LLM: um mapa curto, em texto, do que o
@@ -498,11 +336,12 @@ def _llms_txt(totais) -> None:
     for s, v in VERTICAIS.items():
         if s in totais:
             linhas.append(f"- [{v['rotulo']}]({SITE_URL}/{s}/): {v['h1']}. "
-                          f"{_num(totais[s][0])} estabelecimentos em "
-                          f"{_num(totais[s][1])} cidades.")
+                          f"{num(totais[s][0])} estabelecimentos em "
+                          f"{num(totais[s][1])} cidades.")
+    linhas += marcas.linhas_llms()
     linhas += ["", "## Contato", "",
                f"Correção ou remoção de registro: {SITE_EMAIL_CONTATO}", ""]
-    _escrever(SITE / "llms.txt", "\n".join(linhas))
+    escrever(SITE / "llms.txt", "\n".join(linhas))
 
 
 def _headers(css_nome) -> None:
@@ -512,7 +351,7 @@ def _headers(css_nome) -> None:
     quando a safra muda: um dia de cache com revalidação em segundo plano deixa
     o CDN servir tudo da borda sem nunca esperar pela origem.
     """
-    _escrever(SITE / "_headers", f"""/estatico/{css_nome}
+    escrever(SITE / "_headers", f"""/estatico/{css_nome}
   Cache-Control: public, max-age=31536000, immutable
 
 /estatico/*
@@ -533,7 +372,7 @@ def _headers(css_nome) -> None:
     # Deliberadamente SEM redirecionamento http->https na origem: o domínio está
     # atrás da Cloudflare, e se ela estiver em modo Flexible o redirect aqui
     # criaria laço infinito. Quem força HTTPS é a Cloudflare ("Always Use HTTPS").
-    _escrever(SITE / ".htaccess", """# Gerado por src/site.py. Não editar à mão: 'make site' sobrescreve.
+    escrever(SITE / ".htaccess", """# Gerado por src/site.py. Não editar à mão: 'make site' sobrescreve.
 Options -Indexes -MultiViews
 DirectoryIndex index.html
 ErrorDocument 404 /404.html
@@ -581,7 +420,7 @@ AddDefaultCharset UTF-8
 """)
 
     # nginx equivalente, para quem for servir em VPS
-    _escrever(SITE / "nginx.conf.exemplo", f"""# Trecho de exemplo. Servir site/ como raiz estática.
+    escrever(SITE / "nginx.conf.exemplo", f"""# Trecho de exemplo. Servir site/ como raiz estática.
 # Nenhum processamento por requisição: sendfile + cache de borda.
 server {{
   listen 80;
@@ -602,8 +441,8 @@ def _pagina_404(css_nome) -> None:
     corpo = ("<h1>Página não encontrada</h1>"
              '<p class="resumo">O endereço não existe ou mudou. '
              'Comece pelas áreas de serviço no menu acima.</p>')
-    _escrever(SITE / "404.html",
-              _shell(titulo=f"Página não encontrada | {SITE_NOME}",
+    escrever(SITE / "404.html",
+              shell(titulo=f"Página não encontrada | {SITE_NOME}",
                      descricao="Página não encontrada.", url=SITE_URL + "/404.html",
                      corpo=corpo, css_nome=css_nome))
 
@@ -617,10 +456,14 @@ def gerar() -> int:
     t0 = time.time()
     SITE.mkdir(parents=True, exist_ok=True)
     css_nome, css_texto = css_com_hash()
-    _escrever(SITE / "estatico" / css_nome, css_texto)
-    global _MARCA, _ICONES
-    _MARCA = _preparar_marca()
-    _ICONES = _preparar_icones()
+    escrever(SITE / "estatico" / css_nome, css_texto)
+    preparar_ativos()
+    # As redes por marca vêm de outra origem (o site de cada fabricante) e são
+    # opcionais: sem 'make coletar-marcas', o site sai exatamente como antes.
+    marcas = carregar_marcas(con)
+    if not marcas.disponivel:
+        print("  aviso: sem redes por marca no banco -> rode "
+              "'make coletar-marcas && make carregar-marcas'")
 
     urls, totais = [], {}
     colunas = [d[0] for d in con.execute("SELECT * FROM publicacao LIMIT 0").description]
@@ -643,7 +486,8 @@ def gerar() -> int:
             GROUP BY 1,2,3 ORDER BY n DESC, uf, municipio LIMIT 40
         """, [vertical]).fetchall()
         _pagina_vertical(vertical=vertical, por_uf=por_uf, top_cidades=top,
-                         css_nome=css_nome, urls=urls)
+                         css_nome=css_nome, urls=urls,
+                         marcas=marcas if vertical == VERTICAL_MARCAS else SEM_MARCAS)
 
         for uf, _n, _c in sorted(por_uf, key=lambda x: x[0]):
             cidades = con.execute("""
@@ -666,20 +510,27 @@ def gerar() -> int:
             for slug, linhas in grupos.items():
                 _pagina_cidade(vertical=vertical, uf=uf, mun=linhas[0]["municipio"],
                                slug=slug, ibge=linhas[0]["ibge"], linhas=linhas,
-                               css_nome=css_nome, urls=urls)
-        print(f"  {vertical:<22} {_num(totais[vertical][0]):>9} fichas  "
-              f"{_num(totais[vertical][1]):>6} cidades  "
-              f"{_num(_paginas_escritas):>7} arquivos até aqui", flush=True)
+                               css_nome=css_nome, urls=urls,
+                               marcas=marcas if vertical == VERTICAL_MARCAS else SEM_MARCAS)
+        print(f"  {vertical:<22} {num(totais[vertical][0]):>9} fichas  "
+              f"{num(totais[vertical][1]):>6} cidades  "
+              f"{num(paginas_escritas()):>7} arquivos até aqui", flush=True)
+
+    marcas.gerar(css_nome=css_nome, urls=urls)
+    if marcas.disponivel:
+        print(f"  {'marcas':<22} {num(len(marcas.postos)):>9} marcas   "
+              f"{num(len(marcas.cidades)):>6} cidades  "
+              f"{num(paginas_escritas()):>7} arquivos até aqui", flush=True)
 
     _pagina_home(totais=totais, css_nome=css_nome, urls=urls)
     _pagina_404(css_nome)
     n_sitemaps = _sitemaps(urls)
     _robots()
-    _llms_txt(totais)
+    _llms_txt(totais, marcas)
     _headers(css_nome)
 
     tam = sum(f.stat().st_size for f in SITE.rglob("*") if f.is_file())
-    print(f"\n  {_num(len(urls))} URLs em {_num(_paginas_escritas)} arquivos, "
+    print(f"\n  {num(len(urls))} URLs em {num(paginas_escritas())} arquivos, "
           f"{n_sitemaps} sitemaps, {tam / 1e6:,.0f} MB".replace(",", "."))
     print(f"site gerado em {time.time() - t0:.0f}s  ->  {SITE}")
     return 0

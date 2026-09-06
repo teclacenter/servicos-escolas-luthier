@@ -30,6 +30,34 @@ GLOBS = {
 # Site estático. Tudo o que é de marca ou de endereço vive aqui: trocar o hex
 # ou o domínio é uma linha, e depois `make site` regenera.
 # ---------------------------------------------------------------------------
+# Sigla -> nome do estado. Vive aqui porque o gerador do site, o coletor de
+# marcas e os testes precisam da mesma tabela.
+UF_NOME = {
+    "AC": "Acre", "AL": "Alagoas", "AM": "Amazonas", "AP": "Amapá", "BA": "Bahia",
+    "CE": "Ceará", "DF": "Distrito Federal", "ES": "Espírito Santo", "GO": "Goiás",
+    "MA": "Maranhão", "MG": "Minas Gerais", "MS": "Mato Grosso do Sul",
+    "MT": "Mato Grosso", "PA": "Pará", "PB": "Paraíba", "PE": "Pernambuco",
+    "PI": "Piauí", "PR": "Paraná", "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte",
+    "RO": "Rondônia", "RR": "Roraima", "RS": "Rio Grande do Sul",
+    "SC": "Santa Catarina", "SE": "Sergipe", "SP": "São Paulo", "TO": "Tocantins",
+}
+
+# "em" + nome do estado, já contraído. Tabela fixa porque a contração depende
+# do artigo do nome próprio ("no Rio de Janeiro", "na Bahia", "em São Paulo") e
+# não há regra a derivar: é vocabulário, não gramática.
+UF_EM = {
+    "AC": "no Acre", "AL": "em Alagoas", "AM": "no Amazonas", "AP": "no Amapá",
+    "BA": "na Bahia", "CE": "no Ceará", "DF": "no Distrito Federal",
+    "ES": "no Espírito Santo", "GO": "em Goiás", "MA": "no Maranhão",
+    "MG": "em Minas Gerais", "MS": "no Mato Grosso do Sul",
+    "MT": "no Mato Grosso", "PA": "no Pará", "PB": "na Paraíba",
+    "PE": "em Pernambuco", "PI": "no Piauí", "PR": "no Paraná",
+    "RJ": "no Rio de Janeiro", "RN": "no Rio Grande do Norte",
+    "RO": "em Rondônia", "RR": "em Roraima", "RS": "no Rio Grande do Sul",
+    "SC": "em Santa Catarina", "SE": "em Sergipe", "SP": "em São Paulo",
+    "TO": "no Tocantins",
+}
+
 SITE = RAIZ / "site"                    # saída do gerador (gitignore)
 SITE_URL = "https://servicos.teclacenter.com.br"   # confirmado em 2026-08-24
 SITE_NOME = "Teclacenter Serviços"

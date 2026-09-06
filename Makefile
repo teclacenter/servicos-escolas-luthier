@@ -6,7 +6,8 @@ PY := ./.venv/bin/python
 export PYTHONPATH := src
 
 .PHONY: all dados preparar carregar relatorio exportar publicar site servir \
-        deploy testes limpar limpar-site limpar-tudo auditar-bytes
+        deploy testes limpar limpar-site limpar-tudo auditar-bytes \
+        coletar-marcas carregar-marcas
 
 all: dados publicar site
 dados: preparar carregar relatorio exportar
@@ -26,6 +27,16 @@ relatorio:
 ## exportar — saida/csv/*.csv, saida/parquet/*.parquet e os agregados por cidade
 exportar:
 	$(PY) src/exportar.py
+
+## coletar-marcas — baixa a rede autorizada de cada marca (ÚNICA etapa de rede
+## desta fase; fora de 'make all' de propósito, para 'all' seguir reprodutível
+## offline). Produz o CSV versionado dados-referencia/marcas-autorizadas.csv.
+coletar-marcas:
+	$(PY) src/coletar_marcas.py
+
+## carregar-marcas — põe esse CSV no banco (segundos; não refaz a base da RFB)
+carregar-marcas:
+	$(PY) src/carregar_marcas.py
 
 ## publicar — saida/publicacao.sqlite, indexado por área + estado + cidade
 publicar:

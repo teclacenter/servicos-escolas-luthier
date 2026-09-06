@@ -82,6 +82,11 @@ h2{{font-size:19px;margin:34px 0 12px;font-weight:600}}
 .verticais strong{{display:block;font-size:18px;color:var(--vermelho);margin-bottom:5px}}
 .verticais span{{font-size:13.5px;color:var(--texto-suave)}}
 
+/* botão de chamada (hub de marcas) */
+.botao{{display:inline-block;padding:10px 18px;border-radius:5px;font-weight:600;
+  background:var(--vermelho);color:#fff;font-size:14.5px}}
+.botao:hover{{background:var(--vermelho-escuro);color:#fff;text-decoration:none}}
+
 /* paginação */
 .paginas{{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin:0 0 34px;
   padding-top:20px;border-top:1px solid var(--borda);font-size:14px}}
